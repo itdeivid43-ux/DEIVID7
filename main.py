@@ -10,9 +10,7 @@ app = Flask(__name__)
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-PARES = ["EURUSD=X","GBPUSD=X","AUDUSD=X","NZDUSD=X","USDJPY=X","USDCHF=X","USDCAD=X",
-"EURJPY=X","GBPJPY=X","AUDJPY=X","EURCHF=X","EURAUD=X","EURCAD=X","GBPAUD=X","GBPCAD=X","GBPCHF=X",
-"AUDCAD=X","NZDCAD=X","NZDJPY=X","CHFJPY=X","CADJPY=X","AUDNZD=X","EURNZD=X","GBPNZD=X","CADCHF=X","EURCAD=X"]
+PARES = ["EURUSD=X","GBPUSD=X","AUDUSD=X","NZDUSD=X","USDJPY=X","USDCHF=X","USDCAD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","EURCHF=X","EURAUD=X","EURCAD=X","GBPAUD=X","GBPCAD=X","GBPCHF=X","AUDCAD=X","NZDCAD=X","NZDJPY=X","CHFJPY=X","CADJPY=X","AUDNZD=X","EURNZD=X","GBPNZD=X","CADCHF=X","EURCAD=X"]
 
 def send_telegram(msg):
     try:
@@ -60,7 +58,7 @@ def bot_loop():
                     send_telegram(f"👀 Monitoreo 3M - {time.strftime('%H:%M')} EC - Esperando señal 90%...")
                     c=0
         except: pass
-        time.sleep(180) # CADA 3 MINUTOS
+        time.sleep(180)
 
 threading.Thread(target=bot_loop, daemon=True).start()
 
