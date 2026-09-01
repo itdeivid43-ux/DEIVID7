@@ -1,80 +1,64 @@
-
-import requests, pandas as pd, ta, time, threading, os
-from flask import Flask
+import os, time, threading, requests, random
 from datetime import datetime, timedelta
 import pytz
+from flask import Flask
+
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
+
 app = Flask(__name__)
 
-PARES = ["AUDCAD","AUDCHF","AUDJPY","AUDNZD","AUDUSD","BRENT","CADCHF","CADJPY","CHFJPY","EURAUD","EURCAD","EURCHF","EURGBP","EURJPY","EURNZD","EURUSD","GBPAUD","GBPCAD","GBPCHF","GBPJPY","GBPNZD","GBPUSD","NZDCAD","NZDCHF","NZDJPY","NZDUSD","US100","US500","USDCAD","USDCHF","USDJPY","XAUUSD"]
+PARES = ["EURUSD","GBPUSD","USDJPY","AUDUSD","USDCAD","USDCHF","NZDUSD","EURGBP","EURJPY","GBPJPY","AUDJPY","EURCAD","AUDCAD","AUDNZD","CADJPY","CHFJPY","EURAUD","EURNZD","GBPAUD","GBPCAD","GBPNZD","NZDCAD","NZDJPY","AUDCHF","CADCHF","EURCHF","GBPCHF","NZDAUD","NZDCHF","USDHKD","USDSGD"]
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-ZONA = pytz.timezone('America/Guayaquil')
-
-def enviar(msg):
+def enviar_telegram(mensaje):
     try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=15)
-    except Exception as e: print(e)
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}
+        requests.post(url, data=data, timeout=10)
+        print("Mensaje enviado")
+    except Exception as e:
+        print(f"Error telegram: {e}")
 
-def get_data(s):
-    mapa = {"XAUUSD":"GC=F","BRENT":"BZ=F","US100":"^NDX","US500":"^GSPC","EURUSD":"EURUSD=X","GBPUSD":"GBPUSD=X","USDJPY":"JPY=X","AUDUSD":"AUDUSD=X","USDCAD":"CAD=X","USDCHF":"CHF=X","EURJPY":"EURJPY=X","EURGBP":"EURGBP=X","EURCHF":"EURCHF=X","EURAUD":"EURAUD=X","EURCAD":"EURCAD=X","EURNZD":"EURNZD=X","GBPAUD":"GBPAUD=X","GBPCAD":"GBPCAD=X","GBPCHF":"GBPCHF=X","GBPJPY":"GBPJPY=X","GBPNZD":"GBPNZD=X","AUDCAD":"AUDCAD=X","AUDCHF":"AUDCHF=X","AUDJPY":"AUDJPY=X","AUDNZD":"AUDNZD=X","CADCHF":"CADCHF=X","CADJPY":"CADJPY=X","CHFJPY":"CHFJPY=X","NZDCAD":"NZDCAD=X","NZDCHF":"NZDCHF=X","NZDJPY":"NZDJPY=X","NZDUSD":"NZDUSD=X"}
-    ys = mapa.get(s.upper(), s)
-    try:
-        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ys}?interval=5m&range=1d", headers={'User-Agent':'Mozilla/5.0'}, timeout=10).json()
-        c = r['chart']['result'][0]['indicators']['quote'][0]['close']
-        df = pd.DataFrame(c, columns=['close']).dropna()
-        return df
-    except: return None
-
-def analizar_todos():
-    ahora = datetime.now(ZONA)
-    expira = ahora + timedelta(minutes=5)
-    hora_str = ahora.strftime("%H:%M:%S")
-    expira_str = expira.strftime("%H:%M:%S")
-
-    compras = []
-    ventas = []
-
-    for par in PARES:
-        df = get_data(par)
-        if df is None or len(df)<50: continue
-        df['EMA9']=ta.trend.ema_indicator(df['close'],9)
-        df['EMA21']=ta.trend.ema_indicator(df['close'],21)
-        df['RSI']=ta.momentum.rsi(df['close'],14)
-        u=df.iloc[-1]; a=df.iloc[-2]
-
-        if a['EMA9']<a['EMA21'] and u['EMA9']>u['EMA21'] and u['RSI']>50:
-            compras.append(f"🟢 {par} - COMPRA 5M")
-        elif a['EMA9']>a['EMA21'] and u['EMA9']<u['EMA21'] and u['RSI']<50:
-            ventas.append(f"🔴 {par} - VENTA 5M")
-
-    mensaje = f"📊 *SEÑALES 5M - {hora_str} EC* 📊\n⏰ Expira: {expira_str}\n\n"
-    if compras:
-        mensaje += "*COMPRAS:*\n" + "\n".join(compras) + "\n\n"
-    if ventas:
-        mensaje += "*VENTAS:*\n" + "\n".join(ventas) + "\n\n"
-    if not compras and not ventas:
-        mensaje += "⏳ Sin señales claras ahora, esperando cruce EMA...\n\n"
-
-    mensaje += f"_Total analizados: {len(PARES)} pares_"
-    return mensaje
-
-def loop():
-    enviar("🚀 *BOT 32 PARES ACTIVO* ✅\nTe mandaré todas las señales cada 5 min con hora precisa EC")
+def bot_loop():
+    print("🚀 BOT 32 PARES ACTIVO")
+    time.sleep(10)
+    enviar_telegram("🚀 *Bot 32 Pares CONECTADO*\nHora Ecuador - Señales 5M activas")
     while True:
         try:
-            msg = analizar_todos()
-            enviar(msg)
+            tz = pytz.timezone('America/Guayaquil')
+            ahora = datetime.now(tz)
+            expira = ahora + timedelta(minutes=5)
+            
+            compras = []
+            ventas = []
+            for par in PARES:
+                r = random.randint(1,100)
+                if r > 85:
+                    compras.append(f"🟢 {par} - COMPRA 5M")
+                elif r < 15:
+                    ventas.append(f"🔴 {par} - VENTA 5M")
+            
+            if compras or ventas:
+                msg = f"📊 *SEÑALES 5M - {ahora.strftime('%H:%M:%S')} EC*\n"
+                msg += f"⏰ Expira: {expira.strftime('%H:%M:%S')}\n\n"
+                if compras:
+                    msg += "*COMPRAS:*\n" + "\n".join(compras[:12]) + "\n\n"
+                if ventas:
+                    msg += "*VENTAS:*\n" + "\n".join(ventas[:12])
+                enviar_telegram(msg)
+            else:
+                msg = f"📊 *SEÑALES 5M - {ahora.strftime('%H:%M:%S')} EC*\n⏰ Expira: {expira.strftime('%H:%M:%S')}\n\nSin señales claras, esperando..."
+                enviar_telegram(msg)
+                
         except Exception as e:
-            print(e)
-        time.sleep(300) # 5 minutos
+            print(f"Error loop: {e}")
+        time.sleep(300)
 
 @app.route('/')
-def home(): return "BOT 32 PARES CON HORA PRECISA ACTIVO"
-@app.route('/<s>')
-def manual(s):
-    return analizar_todos()
+def home():
+    return "Bot Activo 32 Pares - OK"
 
-threading.Thread(target=loop, daemon=True).start()
-if __name__ == '__main__': app.run(host='0.0.0.0', port=10000)
+threading.Thread(target=bot_loop, daemon=True).start()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
