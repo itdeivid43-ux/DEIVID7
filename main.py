@@ -1,71 +1,80 @@
-import threading
-import time
-import requests
-import os
+
+import requests, pandas as pd, ta, time, threading, os
 from flask import Flask
-import pandas as pd
-import ta
-
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
-
+from datetime import datetime, timedelta
+import pytz
 app = Flask(__name__)
 
-def send_telegram(msg):
+PARES = ["AUDCAD","AUDCHF","AUDJPY","AUDNZD","AUDUSD","BRENT","CADCHF","CADJPY","CHFJPY","EURAUD","EURCAD","EURCHF","EURGBP","EURJPY","EURNZD","EURUSD","GBPAUD","GBPCAD","GBPCHF","GBPJPY","GBPNZD","GBPUSD","NZDCAD","NZDCHF","NZDJPY","NZDUSD","US100","US500","USDCAD","USDCHF","USDJPY","XAUUSD"]
+
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+ZONA = pytz.timezone('America/Guayaquil')
+
+def enviar(msg):
     try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        data = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
-        requests.post(url, data=data, timeout=10)
-        print(f"Enviado: {msg}")
-    except Exception as e:
-        print(f"Error telegram: {e}")
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        requests.post(url, data={"chat_id": CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=15)
+    except Exception as e: print(e)
 
-def get_klines(symbol, interval="15m", limit=100):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    r = requests.get(url, timeout=10)
-    data = r.json()
-    df = pd.DataFrame(data, columns=["open_time","open","high","low","close","volume","close_time","qav","trades","tbbav","tbqav","ignore"])
-    df["close"] = df["close"].astype(float)
-    return df
+def get_data(s):
+    mapa = {"XAUUSD":"GC=F","BRENT":"BZ=F","US100":"^NDX","US500":"^GSPC","EURUSD":"EURUSD=X","GBPUSD":"GBPUSD=X","USDJPY":"JPY=X","AUDUSD":"AUDUSD=X","USDCAD":"CAD=X","USDCHF":"CHF=X","EURJPY":"EURJPY=X","EURGBP":"EURGBP=X","EURCHF":"EURCHF=X","EURAUD":"EURAUD=X","EURCAD":"EURCAD=X","EURNZD":"EURNZD=X","GBPAUD":"GBPAUD=X","GBPCAD":"GBPCAD=X","GBPCHF":"GBPCHF=X","GBPJPY":"GBPJPY=X","GBPNZD":"GBPNZD=X","AUDCAD":"AUDCAD=X","AUDCHF":"AUDCHF=X","AUDJPY":"AUDJPY=X","AUDNZD":"AUDNZD=X","CADCHF":"CADCHF=X","CADJPY":"CADJPY=X","CHFJPY":"CHFJPY=X","NZDCAD":"NZDCAD=X","NZDCHF":"NZDCHF=X","NZDJPY":"NZDJPY=X","NZDUSD":"NZDUSD=X"}
+    ys = mapa.get(s.upper(), s)
+    try:
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ys}?interval=5m&range=1d", headers={'User-Agent':'Mozilla/5.0'}, timeout=10).json()
+        c = r['chart']['result'][0]['indicators']['quote'][0]['close']
+        df = pd.DataFrame(c, columns=['close']).dropna()
+        return df
+    except: return None
 
-def analyze_symbol(symbol):
-    df = get_klines(symbol)
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=14).rsi()
-    df["ema_fast"] = ta.trend.EMAIndicator(df["close"], window=9).ema_indicator()
-    df["ema_slow"] = ta.trend.EMAIndicator(df["close"], window=21).ema_indicator()
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-    rsi = last["rsi"]
-    price = last["close"]
-    if last["ema_fast"] > last["ema_slow"] and prev["ema_fast"] <= prev["ema_slow"] and rsi > 50:
-        return f"🟢 COMPRA {symbol}\nPrecio: ${price:.2f}\nRSI: {rsi:.1f}\nCruce EMA 9 > 21"
-    if last["ema_fast"] < last["ema_slow"] and prev["ema_fast"] >= prev["ema_slow"] and rsi < 50:
-        return f"🔴 VENTA {symbol}\nPrecio: ${price:.2f}\nRSI: {rsi:.1f}\nCruce EMA 9 < 21"
-    return None
+def analizar_todos():
+    ahora = datetime.now(ZONA)
+    expira = ahora + timedelta(minutes=5)
+    hora_str = ahora.strftime("%H:%M:%S")
+    expira_str = expira.strftime("%H:%M:%S")
 
-def bot_loop():
-    print("Bot Deivid iniciado...")
-    if TELEGRAM_TOKEN:
-        send_telegram("✅ Bot Deivid conectado y analizando cada 60 seg - BTC, ETH, SOL")
+    compras = []
+    ventas = []
+
+    for par in PARES:
+        df = get_data(par)
+        if df is None or len(df)<50: continue
+        df['EMA9']=ta.trend.ema_indicator(df['close'],9)
+        df['EMA21']=ta.trend.ema_indicator(df['close'],21)
+        df['RSI']=ta.momentum.rsi(df['close'],14)
+        u=df.iloc[-1]; a=df.iloc[-2]
+
+        if a['EMA9']<a['EMA21'] and u['EMA9']>u['EMA21'] and u['RSI']>50:
+            compras.append(f"🟢 {par} - COMPRA 5M")
+        elif a['EMA9']>a['EMA21'] and u['EMA9']<u['EMA21'] and u['RSI']<50:
+            ventas.append(f"🔴 {par} - VENTA 5M")
+
+    mensaje = f"📊 *SEÑALES 5M - {hora_str} EC* 📊\n⏰ Expira: {expira_str}\n\n"
+    if compras:
+        mensaje += "*COMPRAS:*\n" + "\n".join(compras) + "\n\n"
+    if ventas:
+        mensaje += "*VENTAS:*\n" + "\n".join(ventas) + "\n\n"
+    if not compras and not ventas:
+        mensaje += "⏳ Sin señales claras ahora, esperando cruce EMA...\n\n"
+
+    mensaje += f"_Total analizados: {len(PARES)} pares_"
+    return mensaje
+
+def loop():
+    enviar("🚀 *BOT 32 PARES ACTIVO* ✅\nTe mandaré todas las señales cada 5 min con hora precisa EC")
     while True:
         try:
-            for symbol in SYMBOLS:
-                signal = analyze_symbol(symbol)
-                if signal:
-                    send_telegram(signal)
-                time.sleep(1)
-            print(f"Chequeo OK {time.strftime('%H:%M:%S')}")
-            time.sleep(60)
+            msg = analizar_todos()
+            enviar(msg)
         except Exception as e:
-            print(f"Error loop: {e}")
-            time.sleep(10)
+            print(e)
+        time.sleep(300) # 5 minutos
 
-@app.route("/")
-def home():
-    return "Bot Deivid 24/7 OK"
+@app.route('/')
+def home(): return "BOT 32 PARES CON HORA PRECISA ACTIVO"
+@app.route('/<s>')
+def manual(s):
+    return analizar_todos()
 
-if __name__ == "__main__":
-    t = threading.Thread(target=bot_loop, daemon=True)
-    t.start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+threading.Thread(target=loop, daemon=True).start()
+if __name__ == '__main__': app.run(host='0.0.0.0', port=10000)
