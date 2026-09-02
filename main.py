@@ -1,118 +1,67 @@
 from flask import Flask
 import threading, time, requests, os
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import yfinance as yf
-import pandas as pd
-import io
 
 app = Flask(__name__)
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 
-def enviar_texto(texto):
+PARES = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","USDCAD=X","NZDUSD=X","EURJPY=X","GBPJPY=X","EURGBP=X","AUDJPY=X","EURAUD=X","EURCAD=X","GBPCHF=X","USDCHF=X","NZDJPY=X","CADJPY=X","AUDNZD=X","AUDCAD=X","AUDCHF=X","CADCHF=X","CHFJPY=X","EURNZD=X","EURCHF=X","GBPAUD=X","GBPCAD=X","GBPNZD=X","NZDCHF=X","NZDCAD=X"]
+
+def enviar(texto):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=15)
-        print(f"ENVIADO: {texto[:80]}", flush=True)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=10)
+        print(f"ENVIADO: {texto[:60]}", flush=True)
     except Exception as e:
-        print(f"Error envio texto: {e}", flush=True)
+        print(e, flush=True)
 
-def enviar_con_grafico(texto, precio, sl, tp1, tp2, closes, señal):
-    try:
-        plt.figure(figsize=(10,5))
-        plt.plot(closes[-100:], color='white', linewidth=1.5)
-        plt.axhline(precio, color='cyan', linestyle='--', label=f'Entrada {precio:.2f}')
-        plt.axhline(sl, color='red', linestyle='--', label=f'SL {sl:.2f}')
-        plt.axhline(tp1, color='green', linestyle='--', label=f'TP1 {tp1:.2f}')
-        plt.axhline(tp2, color='green', linestyle='-', label=f'TP2 {tp2:.2f}')
-        plt.style.use('dark_background')
-        plt.legend()
-        plt.title(f"ORO - {señal}")
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png')
-        buf.seek(0)
-        plt.close()
-        
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-        files = {'photo': buf}
-        data = {"chat_id": CHAT_ID, "caption": texto, "parse_mode": "Markdown"}
-        requests.post(url, data=data, files=files, timeout=20)
-        print("Grafico enviado", flush=True)
-    except Exception as e:
-        print(f"Error grafico: {e}", flush=True)
-        enviar_texto(texto)
-
-def analizar_pro():
-    try:
-        print("Analizando ORO...", flush=True)
-        # Descarga ORO 5m
-        df = yf.download("GC=F", period="2d", interval="5m", progress=False)
-        if len(df) < 200:
-            print("Datos insuficientes", flush=True)
-            return
-        
-        closes = df['Close']
-        precio = float(closes.iloc[-1])
-        ema50 = float(closes.ewm(span=50).mean().iloc[-1])
-        ema200 = float(closes.ewm(span=200).mean().iloc[-1])
-        
-        # RSI 14
-        delta = closes.diff()
-        gain = delta.where(delta > 0, 0).rolling(14).mean()
-        loss = -delta.where(delta < 0, 0).rolling(14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        rsi_val = float(rsi.iloc[-1])
-
-        señal = None
-        if precio > ema50 and ema50 > ema200 and rsi_val > 50 and rsi_val < 70:
-            señal = "COMPRAR"
-            sl = precio - 4
-            tp1 = precio + 2.6  # +130 pips aprox en oro
-            tp2 = precio + 5.2  # +260 pips
-        elif precio < ema50 and ema50 < ema200 and rsi_val < 50 and rsi_val > 30:
-            señal = "VENDER"
-            sl = precio + 4
-            tp1 = precio - 2.6
-            tp2 = precio - 5.2
-        else:
-            print(f"No hay señal - Precio:{precio:.2f} EMA50:{ema50:.2f} EMA200:{ema200:.2f} RSI:{rsi_val:.1f}", flush=True)
-            return
-
-        msg = f"""🚀 *{señal} ORO XAUUSD 5m* 
-
-💰 Entrada: `{precio:.2f}`
-🔴 SL: `{sl:.2f}` 
-🟢 TP1: `{tp1:.2f}` (+130 pips)
-🟢 TP2: `{tp2:.2f}` (+260 pips)
-
-📊 EMA50: {ema50:.2f} | EMA200: {ema200:.2f}
-📈 RSI: {rsi_val:.1f}
-📉 Gráfico con niveles abajo 👇
-"""
-        enviar_con_grafico(msg, precio, sl, tp1, tp2, closes, señal)
-
-    except Exception as e:
-        print(f"Error analizar_pro: {e}", flush=True)
+def analizar():
+    print("Analizando 28 pares binarias...", flush=True)
+    for par in PARES:
+        try:
+            df = yf.download(par, period="2d", interval="5m", progress=False, auto_adjust=True)
+            if len(df) < 60: continue
+            c = df['Close']
+            # Si es DataFrame con MultiIndex
+            if hasattr(c, 'iloc') and len(c.shape) > 1:
+                c = c.iloc[:,0]
+            
+            ema9 = c.ewm(span=9).mean().iloc[-1]
+            ema21 = c.ewm(span=21).mean().iloc[-1]
+            ema50 = c.ewm(span=50).mean().iloc[-1]
+            precio = float(c.iloc[-1])
+            
+            nombre = par.replace("=X","")
+            
+            # BINARIAS 85% + FILTRO LATERAL
+            if ema9 > ema21 and ema21 > ema50 and precio > ema9:
+                enviar(f"🟢 *{nombre} | COMPRA 5M*\n💹 BINARIAS\n📊 EMA 9>21>50 | Precio sobre EMA9\n🎯 Confianza 85% | Expiracion 5m\n⏰ {time.strftime('%H:%M')} Ecuador")
+            elif ema9 < ema21 and ema21 < ema50 and precio < ema9:
+                enviar(f"🔴 *{nombre} | VENTA 5M*\n💹 BINARIAS\n📊 EMA 9<21<50 | Precio bajo EMA9\n🎯 Confianza 85% | Expiracion 5m\n⏰ {time.strftime('%H:%M')} Ecuador")
+            else:
+                print(f"{nombre} lateral - no señal", flush=True)
+            time.sleep(1.5)
+        except Exception as e:
+            print(f"Error {par}: {e}", flush=True)
+            continue
 
 def bot_loop():
-    enviar_texto("🚀 *BOT ORO V3 GRAFICO INICIADO*\n✅ EMA+RSI + Gráficos con TP/SL\n⏰ Analizando cada 60s - Hora Ecuador")
+    enviar("🚀 *BOT BINARIAS DEIVID ACTIVO*\n28 Pares | 5m | 85% + Lateral\nEscaneo cada 1 min")
     while True:
         try:
-            analizar_pro()  # PRIMERO ANALIZA
-            time.sleep(60)  # LUEGO DUERME 60s
-        except Exception as e:
-            print(e, flush=True)
+            analizar()
             time.sleep(60)
+        except Exception as e:
+            print(f"Error loop: {e}", flush=True)
+            time.sleep(30)
 
 threading.Thread(target=bot_loop, daemon=True).start()
 
 @app.route("/")
 def home():
-    return "Bot Oro V3 Grafico Activo"
+    return "BOT BINARIAS 28 PARES ACTIVO"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
