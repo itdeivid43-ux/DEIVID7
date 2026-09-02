@@ -1,61 +1,52 @@
 from flask import Flask
 import threading, time, requests, os, yfinance as yf
-import pandas as pd
-
 app = Flask(__name__)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
-PARES = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","NZDUSD=X","NZDCAD=X","EURJPY=X","GBPJPY=X","AUDJPY=X","USDCAD=X"]
+PARES = ["EURUSD=X","GBPUSD=X","USDJPY=X","AUDUSD=X","EURJPY=X","GBPJPY=X","USDCHF=X"]
 
-def log(m): print(m, flush=True)
 def enviar(t):
     try:
-        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data={"chat_id": CHAT_ID, "text": t, "parse_mode": "Markdown"}, timeout=15)
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data={"chat_id": CHAT_ID, "text": t, "parse_mode": "Markdown"}, timeout=10)
     except: pass
 
-def calcular_rsi(serie, period=14):
-    delta = serie.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+def rsi(s, p=14):
+    d = s.diff()
+    g = (d.where(d>0,0)).rolling(p).mean()
+    l = (-d.where(d<0,0)).rolling(p).mean()
+    return 100-(100/(1+g/l))
 
-def bot_loop():
-    log(">>>>>>>> BOT V6 FORMATO BONITO INICIADO <<<<<<<<")
-    enviar("✅ *BOT DEIVID V6 ACTIVO*\nFormato bonito restaurado\n📊 Señales cada 3 min")
+def bot():
+    print("BOT BINARIAS V7 INICIADO", flush=True)
+    enviar("✅ *BOT BINARIAS DEIVID V7 ACTIVO*\n💵 Binarias 5m")
     while True:
         try:
             for par in PARES:
                 try:
-                    df = yf.download(par, period="1d", interval="5m", progress=False, auto_adjust=True, threads=False)
-                    if len(df) < 55: continue
-                    close = df['Close']
-                    if len(close.shape) > 1: close = close.iloc[:,0]
-                    ema9 = close.ewm(span=9).mean().iloc[-1]
-                    ema21 = close.ewm(span=21).mean().iloc[-1]
-                    ema50 = close.ewm(span=50).mean().iloc[-1]
-                    rsi = float(calcular_rsi(close).iloc[-1])
-                    precio = float(close.iloc[-1])
-                    nombre = par.replace("=X","")
-                    compra = ema9 > ema21 and ema21 > ema50 * 0.999
-                    venta = ema9 < ema21 and ema21 < ema50 * 1.001
-                    if compra and 40 < rsi < 75:
-                        hora = time.strftime('%H:%M')
-                        enviar(f"📊 *SEÑAL {hora} EC*\n\n🟢 *COMPRAR {nombre} 5m*\n💰 {precio:.5f}\n📈 EMA9>EMA21>EMA50\n📉 RSI {rsi:.1f}\n🎯 Confianza 95% ✅\n💵 Payout 85%\n\n⏰ Entrar siguiente vela 5m")
-                        break
-                    elif venta and 25 < rsi < 60:
-                        hora = time.strftime('%H:%M')
-                        enviar(f"📊 *SEÑAL {hora} EC*\n\n🔴 *VENDER {nombre} 5m*\n💰 {precio:.5f}\n📉 EMA9<EMA21<EMA50\n📈 RSI {rsi:.1f}\n🎯 Confianza 95% ✅\n💵 Payout 85%\n\n⏰ Entrar siguiente vela 5m")
-                        break
+                    df = yf.download(par, period="1d", interval="5m", progress=False, auto_adjust=True)
+                    if len(df)<60: continue
+                    c = df['Close']
+                    if len(c.shape)>1: c=c.iloc[:,0]
+                    e9=c.ewm(span=9).mean().iloc[-1]
+                    e21=c.ewm(span=21).mean().iloc[-1]
+                    e50=c.ewm(span=50).mean().iloc[-1]
+                    r=float(rsi(c).iloc[-1])
+                    p=float(c.iloc[-1])
+                    n=par.replace("=X","")
+                    if e9>e21>e50 and 55<r<75:
+                        h=time.strftime('%H:%M')
+                        enviar(f"📊 *SEÑAL {h} EC*\n\n🟢 *COMPRAR {n} 5m*\n💰 {p:.5f}\n📈 EMA9>EMA21>EMA50\n📉 RSI {r:.1f}\n🎯 Confianza 95% ✅\n💵 Payout 85%\n\n⏰ *BINARIA 5 MIN*")
+                        time.sleep(300); break
+                    if e9<e21<e50 and 25<r<45:
+                        h=time.strftime('%H:%M')
+                        enviar(f"📊 *SEÑAL {h} EC*\n\n🔴 *VENDER {n} 5m*\n💰 {p:.5f}\n📉 EMA9<EMA21<EMA50\n📈 RSI {r:.1f}\n🎯 Confianza 95% ✅\n💵 Payout 85%\n\n⏰ *BINARIA 5 MIN*")
+                        time.sleep(300); break
                 except: continue
-            time.sleep(180)
+            time.sleep(120)
         except: time.sleep(30)
 
-threading.Thread(target=bot_loop, daemon=True).start()
-
+threading.Thread(target=bot, daemon=True).start()
 @app.route("/")
-def home(): return "V6 BONITO ACTIVO"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+def home(): return "BOT BINARIAS V7 ACTIVO"
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT",10000)))
