@@ -3,6 +3,9 @@ import threading, time, requests, os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import yfinance as yf
+import pandas as pd
+import io
 
 app = Flask(__name__)
 
@@ -12,100 +15,95 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID")
 def enviar_texto(texto):
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": CHAT_ID, "text": texto, "parse_mode":"Markdown"}, timeout=10)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": texto, "parse_mode": "Markdown"}, timeout=15)
+        print(f"ENVIADO: {texto[:80]}", flush=True)
     except Exception as e:
-        print(e, flush=True)
+        print(f"Error envio texto: {e}", flush=True)
 
 def enviar_con_grafico(texto, precio, sl, tp1, tp2, closes, señal):
     try:
         plt.figure(figsize=(10,5))
         plt.plot(closes[-100:], color='white', linewidth=1.5)
-        plt.axhline(precio, color='#00FF00', linestyle='--', label=f'Entrada {precio:.2f}')
-        plt.axhline(sl, color='#FF0000', linestyle='--', label=f'SL {sl:.2f}')
-        plt.axhline(tp1, color='#00BFFF', linestyle='--', label=f'TP1 {tp1:.2f}')
-        plt.axhline(tp2, color='#FFD700', linestyle='--', label=f'TP2 {tp2:.2f}')
-        plt.title(f'XAUUSD - {señal} - ORO PRO V3', color='white')
-        plt.legend()
+        plt.axhline(precio, color='cyan', linestyle='--', label=f'Entrada {precio:.2f}')
+        plt.axhline(sl, color='red', linestyle='--', label=f'SL {sl:.2f}')
+        plt.axhline(tp1, color='green', linestyle='--', label=f'TP1 {tp1:.2f}')
+        plt.axhline(tp2, color='green', linestyle='-', label=f'TP2 {tp2:.2f}')
         plt.style.use('dark_background')
-        plt.tight_layout()
-        plt.savefig('/tmp/chart.png', dpi=150)
+        plt.legend()
+        plt.title(f"ORO - {señal}")
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
         plt.close()
-
+        
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
-        with open('/tmp/chart.png', 'rb') as f:
-            requests.post(url, data={"chat_id": CHAT_ID, "caption": texto, "parse_mode":"Markdown"}, files={"photo": f}, timeout=20)
+        files = {'photo': buf}
+        data = {"chat_id": CHAT_ID, "caption": texto, "parse_mode": "Markdown"}
+        requests.post(url, data=data, files=files, timeout=20)
         print("Grafico enviado", flush=True)
     except Exception as e:
         print(f"Error grafico: {e}", flush=True)
         enviar_texto(texto)
 
-def get_klines():
-    try:
-        url = "https://api.binance.com/api/v3/klines?symbol=PAXGUSDT&interval=5m&limit=200"
-        r = requests.get(url, timeout=10).json()
-        closes = [float(x[4]) for x in r]
-        return closes
-    except:
-        return []
-
-def ema(data, period):
-    k = 2 / (period + 1)
-    ema_val = sum(data[:period]) / period
-    for price in data[period:]:
-        ema_val = price * k + ema_val * (1 - k)
-    return ema_val
-
-def rsi(data, period=14):
-    gains = losses = 0
-    for i in range(1, period+1):
-        change = data[-i] - data[-i-1]
-        if change > 0: gains += change
-        else: losses -= change
-    if losses == 0: return 100
-    rs = gains / losses
-    return 100 - (100 / (1 + rs))
-
 def analizar_pro():
-    closes = get_klines()
-    if len(closes) < 200: return
-    precio = closes[-1]
-    ema50 = ema(closes, 50)
-    ema200 = ema(closes, 200)
-    rsi_val = rsi(closes)
+    try:
+        print("Analizando ORO...", flush=True)
+        # Descarga ORO 5m
+        df = yf.download("GC=F", period="2d", interval="5m", progress=False)
+        if len(df) < 200:
+            print("Datos insuficientes", flush=True)
+            return
+        
+        closes = df['Close']
+        precio = float(closes.iloc[-1])
+        ema50 = float(closes.ewm(span=50).mean().iloc[-1])
+        ema200 = float(closes.ewm(span=200).mean().iloc[-1])
+        
+        # RSI 14
+        delta = closes.diff()
+        gain = delta.where(delta > 0, 0).rolling(14).mean()
+        loss = -delta.where(delta < 0, 0).rolling(14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        rsi_val = float(rsi.iloc[-1])
 
-    señal = None
-    if ema50 > ema200 and 50 < rsi_val < 68: señal = "COMPRA 📈"
-    elif ema50 < ema200 and 32 < rsi_val < 50: señal = "VENTA 📉"
+        señal = None
+        if precio > ema50 and ema50 > ema200 and rsi_val > 50 and rsi_val < 70:
+            señal = "COMPRAR"
+            sl = precio - 4
+            tp1 = precio + 2.6  # +130 pips aprox en oro
+            tp2 = precio + 5.2  # +260 pips
+        elif precio < ema50 and ema50 < ema200 and rsi_val < 50 and rsi_val > 30:
+            señal = "VENDER"
+            sl = precio + 4
+            tp1 = precio - 2.6
+            tp2 = precio - 5.2
+        else:
+            print(f"No hay señal - Precio:{precio:.2f} EMA50:{ema50:.2f} EMA200:{ema200:.2f} RSI:{rsi_val:.1f}", flush=True)
+            return
 
-    if not señal:
-        print(f"Sin señal - RSI:{rsi_val:.1f}", flush=True)
-        return
+        msg = f"""🚀 *{señal} ORO XAUUSD 5m* 
 
-    if "COMPRA" in señal:
-        sl, tp1, tp2 = precio - 10, precio + 13, precio + 26
-    else:
-        sl, tp1, tp2 = precio + 10, precio - 13, precio - 26
-
-    msg = f"""🔥 *SEÑAL PRO ORO V3 - XAUUSD*
-
-📊 *{señal}*
 💰 Entrada: `{precio:.2f}`
-🛑 SL: `{sl:.2f}` (-100 pips)
-🎯 TP1: `{tp1:.2f}` (+130 pips)
-🎯 TP2: `{tp2:.2f}` (+260 pips)
+🔴 SL: `{sl:.2f}` 
+🟢 TP1: `{tp1:.2f}` (+130 pips)
+🟢 TP2: `{tp2:.2f}` (+260 pips)
 
-📈 EMA50: {ema50:.2f} | EMA200: {ema200:.2f}
-📊 RSI: {rsi_val:.1f}
-✅ Gráfico con niveles abajo 👇
+📊 EMA50: {ema50:.2f} | EMA200: {ema200:.2f}
+📈 RSI: {rsi_val:.1f}
+📉 Gráfico con niveles abajo 👇
 """
-    enviar_con_grafico(msg, precio, sl, tp1, tp2, closes, señal)
+        enviar_con_grafico(msg, precio, sl, tp1, tp2, closes, señal)
+
+    except Exception as e:
+        print(f"Error analizar_pro: {e}", flush=True)
 
 def bot_loop():
-    enviar_texto("✅ *BOT ORO V3 GRAFICO INICIADO*\n📊 EMA+RSI + Gráficos con TP/SL\nEsperando señal segura Deivid...")
+    enviar_texto("🚀 *BOT ORO V3 GRAFICO INICIADO*\n✅ EMA+RSI + Gráficos con TP/SL\n⏰ Analizando cada 60s - Hora Ecuador")
     while True:
         try:
-            time.sleep(300)
-            analizar_pro()
+            analizar_pro()  # PRIMERO ANALIZA
+            time.sleep(60)  # LUEGO DUERME 60s
         except Exception as e:
             print(e, flush=True)
             time.sleep(60)
